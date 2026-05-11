@@ -3,14 +3,37 @@ import time
 import sys
 import json
 from datetime import datetime
+import ctypes
+from ctypes import wintypes
 
-try:
-    from plyer import notification
-    NOTIFIER_AVAILABLE = True
-except ImportError:
-    NOTIFIER_AVAILABLE = False
-    print('⚠️ plyer未安装，将无法使用弹窗通知功能')
-    print('请运行: pip install plyer')
+NOTIFIER_AVAILABLE = True
+
+class WindowsNotification:
+    def __init__(self):
+        self.user32 = ctypes.WinDLL('user32', use_last_error=True)
+        
+        self.user32.MessageBoxW.argtypes = [
+            wintypes.HWND,
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            wintypes.UINT
+        ]
+        self.user32.MessageBoxW.restype = wintypes.INT
+        
+        self.MB_OK = 0x00000000
+        self.MB_ICONINFORMATION = 0x00000040
+        self.MB_TOPMOST = 0x00040000
+    
+    def notify(self, title, message, timeout=10):
+        try:
+            flags = self.MB_OK | self.MB_ICONINFORMATION | self.MB_TOPMOST
+            self.user32.MessageBoxW(None, message, title, flags)
+            return True
+        except Exception as e:
+            print(f'通知失败: {e}')
+            return False
+
+windows_notifier = WindowsNotification()
 
 api = {
     'url': 'https://sz.inboyu.com/activity/graduate-info?id=8248ec76-016d-11f0-aa1d-a088c260cfb6',
@@ -103,11 +126,7 @@ class AlertManager:
     def sendNotification(title, message):
         if alert['enableNotification'] and NOTIFIER_AVAILABLE:
             try:
-                notification.notify(
-                    title=title,
-                    message=message,
-                    timeout=10
-                )
+                windows_notifier.notify(title, message)
             except Exception as e:
                 logger.error(f'发送通知失败: {e}')
     
@@ -227,7 +246,6 @@ def checkRooms():
             logger.info(str(originalHtml)[:500] if len(str(originalHtml)) > 500 else str(originalHtml))
         
         logger.info(f'📊 当前房间数 (totalRoomNum): {totalRoomNum}')
-        
         if totalRoomNum > 0:
             AlertManager.alert(currentTargetAddress, totalRoomNum)
         else:
