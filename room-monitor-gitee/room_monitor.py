@@ -45,7 +45,7 @@ addresses = {
 
 timeRanges = {
     'morning': {'start': 12, 'end': 13.5},
-    'afternoon': {'start': 13.55, 'end': 15.5}
+    'afternoon': {'start': 13.55, 'end': 16}
 }
 
 alert = {
@@ -64,22 +64,29 @@ REQUEST_INTERVAL = 5
 CLOUDFLARE_WORKER_URL = 'https://cool-cherry-65c2.xiao-lo01.workers.dev/'
 
 class Logger:
+    def print_log(self, prefix, msg):
+        try:
+            print(f'{prefix} {msg}')
+        except UnicodeEncodeError:
+            msg = msg.encode('ascii', 'replace').decode('ascii')
+            print(f'{prefix} {msg}')
+    
     def info(self, msg):
-        print(f'[INFO] {msg}')
+        self.print_log('[INFO]', msg)
     
     def warn(self, msg):
-        print(f'[WARN] {msg}')
+        self.print_log('[WARN]', msg)
     
     def error(self, msg):
-        print(f'[ERROR] {msg}')
+        self.print_log('[ERROR]', msg)
     
     def debug(self, msg):
         if log['minLogLevel'] == 'debug':
-            print(f'[DEBUG] {msg}')
+            self.print_log('[DEBUG]', msg)
     
     def trace(self, msg):
         if log['enableTrace']:
-            print(f'[TRACE] {msg}')
+            self.print_log('[TRACE]', msg)
 
 logger = Logger()
 
@@ -168,9 +175,6 @@ def checkRooms():
         logger.debug(f'🕐 {timestamp} - 正在检查房间数据...')
         
         requestConfig = api.copy()
-        logger.info(f'📊 请求参数:')
-        logger.info(f'   URL: {requestConfig["url"]}')
-        logger.info(f'   Method: {requestConfig["method"]}')
         
         response = requests.request(
             method=requestConfig['method'],
@@ -178,9 +182,6 @@ def checkRooms():
             headers=requestConfig['headers'],
             timeout=requestConfig['timeout']
         )
-        
-        logger.info('📡 响应头:')
-        logger.info(json.dumps(dict(response.headers), ensure_ascii=False))
         
         try:
             originalHtml = response.json()
@@ -257,9 +258,7 @@ def init():
     logger.info(f'   - 上午时段 ({formatTime(timeRanges["morning"]["start"])}-{formatTime(timeRanges["morning"]["end"])}): {addresses["morning"]}')
     logger.info(f'   - 下午时段 ({formatTime(timeRanges["afternoon"]["start"])}-{formatTime(timeRanges["afternoon"]["end"])}): {addresses["afternoon"]}')
     logger.info(f'⏱️  请求间隔：{REQUEST_INTERVAL}秒')
-    logger.info(f'🌐 API地址：{api["url"]}')
     logger.info(f'📊 日志级别：{log["minLogLevel"]}')
-    logger.info(f'🍪 Cookie来源: {gitee["cookie_url"]}')
     logger.info('----------------------------------------')
     
     checkRooms()
