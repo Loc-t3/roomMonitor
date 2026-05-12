@@ -1,3 +1,4 @@
+import os
 import requests
 import time
 import sys
@@ -6,7 +7,11 @@ from datetime import datetime
 import ctypes
 from ctypes import wintypes
 
+
+
 NOTIFIER_AVAILABLE = True
+
+session = requests.Session()
 
 class WindowsNotification:
     def __init__(self):
@@ -38,7 +43,7 @@ windows_notifier = WindowsNotification()
 api = {
     'url': 'https://sz.inboyu.com/activity/graduate-info?id=8248ec76-016d-11f0-aa1d-a088c260cfb6',
     'method': 'GET',
-    'timeout': 10,
+    'timeout': 3,
     'headers': {
         'Host': 'sz.inboyu.com',
         'Sec-Fetch-Site': 'same-origin',
@@ -67,8 +72,8 @@ addresses = {
 }
 
 timeRanges = {
-    'morning': {'start': 12, 'end': 13.5},
-    'afternoon': {'start': 13.55, 'end': 16}
+    'morning': {'start': 7, 'end': 13.8},
+    'afternoon': {'start': 13.8, 'end': 23}
 }
 
 alert = {
@@ -83,8 +88,8 @@ log = {
     'enableTrace': True
 }
 
-REQUEST_INTERVAL = 5
-CLOUDFLARE_WORKER_URL = 'https://cool-cherry-65c2.xiao-lo01.workers.dev/'
+REQUEST_INTERVAL = 4
+
 
 class Logger:
     def print_log(self, prefix, msg):
@@ -164,11 +169,13 @@ def getTargetAddressByTime():
 
 def fetch_cookie_from_gitee():
     try:
-        response = requests.get(gitee['cookie_url'], timeout=gitee['timeout'])
+        session = requests.Session()
+        session.trust_env = False
+        response = session.get(gitee['cookie_url'], timeout=gitee['timeout'])
         response.raise_for_status()
         cookie = response.text.strip()
         if cookie:
-            logger.info('✅ 成功从Gitee获取Cookie')
+            logger.info('✅ 成功从获取Cookie')
             return cookie
     except requests.exceptions.RequestException as e:
         logger.warn(f'❌ 从Gitee获取Cookie失败: {e}')
@@ -185,7 +192,7 @@ def checkRooms():
         if currentTargetAddress != newTargetAddress:
             currentTargetAddress = newTargetAddress
             if currentTargetAddress:
-                logger.info(f'⏰ 监控时间段切换，当前关注地址：{currentTargetAddress}')
+                logger.info(f'⏰ 监控时间段切换')
             else:
                 logger.info('⏰ 当前非监控时段，跳过检查')
                 return
@@ -195,7 +202,7 @@ def checkRooms():
         
         requestConfig = api.copy()
         
-        response = requests.request(
+        response = session.request(
             method=requestConfig['method'],
             url=requestConfig['url'],
             headers=requestConfig['headers'],
@@ -207,13 +214,32 @@ def checkRooms():
         except ValueError:
             originalHtml = response.text
         
-        logger.info('📡 响应体:')
-        
         totalRoomNum = 0
         targetProject = None
         
         if isinstance(originalHtml, dict) and originalHtml.get('data') and originalHtml['data'].get('projects'):
             projects = originalHtml['data']['projects']
+            
+            for project in projects:
+                if project.get('houseType'):
+                    for house in project['houseType']:
+                        if house.get('roomNum'):
+                            roomNum = house['roomNum']
+                            if isinstance(roomNum, list):
+                                totalRoomNum += sum(num or 0 for num in roomNum)
+                            else:
+                                totalRoomNum += roomNum or 0
+                                
+            logger.info(f'📊 当前房间数 : {totalRoomNum}')
+            if totalRoomNum > 0:
+                
+                AlertManager.alert(currentTargetAddress, totalRoomNum)
+            else:
+                if getTargetAddressByTime():
+                    logger.info('✅ 当前没有可用房间')
+                else:
+                    logger.info('当前非监控时段，跳过检查')
+            
             targetAddress = getTargetAddressByTime()
             
             if targetAddress:
@@ -232,28 +258,11 @@ def checkRooms():
                     logger.info('未找到对应项目')
             else:
                 logger.info('当前非监控时段，跳过检查')
-            
-            for project in originalHtml['data']['projects']:
-                if project.get('houseType'):
-                    for house in project['houseType']:
-                        if house.get('roomNum'):
-                            roomNum = house['roomNum']
-                            if isinstance(roomNum, list):
-                                totalRoomNum += sum(num or 0 for num in roomNum)
-                            else:
-                                totalRoomNum += roomNum or 0
         else:
             logger.info(str(originalHtml)[:500] if len(str(originalHtml)) > 500 else str(originalHtml))
         
-        logger.info(f'📊 当前房间数 (totalRoomNum): {totalRoomNum}')
-        if totalRoomNum > 0:
-            AlertManager.alert(currentTargetAddress, totalRoomNum)
-        else:
-            if getTargetAddressByTime():
-                logger.info('✅ 当前没有可用房间')
-            else:
-                logger.info('当前非监控时段，跳过检查')
         
+
         logger.debug('----------------------------------------')
         
     except requests.exceptions.RequestException as e:
@@ -275,15 +284,20 @@ def init():
     logger.info('📍 监控配置：')
     logger.info(f'   - 上午时段 ({formatTime(timeRanges["morning"]["start"])}-{formatTime(timeRanges["morning"]["end"])}): {addresses["morning"]}')
     logger.info(f'   - 下午时段 ({formatTime(timeRanges["afternoon"]["start"])}-{formatTime(timeRanges["afternoon"]["end"])}): {addresses["afternoon"]}')
-    logger.info(f'⏱️  请求间隔：{REQUEST_INTERVAL}秒')
-    logger.info(f'📊 日志级别：{log["minLogLevel"]}')
     logger.info('----------------------------------------')
     
-    checkRooms()
+    
+    
     
     while True:
         try:
+            check_start_time = time.time()
+            logger.info(f'[TIMER] checkRooms开始')
             checkRooms()
+            check_end_time = time.time()
+            check_duration = check_end_time - check_start_time
+            logger.info(f'[TIMER] checkRooms耗时: {check_duration:.3f}秒')
+            logger.info('----------------------------------------')
             time.sleep(REQUEST_INTERVAL)
         except KeyboardInterrupt:
             handleExit()
